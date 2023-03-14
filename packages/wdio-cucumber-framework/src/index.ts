@@ -8,6 +8,9 @@ import isGlob from 'is-glob'
 import glob from 'glob'
 
 import * as Cucumber from '@cucumber/cucumber'
+import type { IRunOptions } from '@cucumber/cucumber/api'
+import { loadSources, runCucumber } from '@cucumber/cucumber/api'
+
 import {
     After,
     AfterAll,
@@ -27,7 +30,8 @@ import {
     When
 } from '@cucumber/cucumber'
 import type { IRuntimeOptions, ITestCaseHookParameter } from '@cucumber/cucumber'
-import { GherkinStreams } from '@cucumber/gherkin-streams'
+
+import type { Envelope } from '@cucumber/messages'
 import { IdGenerator } from '@cucumber/messages'
 
 import { executeHooksWithArgs, testFnWrapper } from '@wdio/utils'
@@ -118,18 +122,13 @@ class CucumberAdapter {
 
     async init() {
         try {
-            const gherkinMessageStream = GherkinStreams.fromPaths(this._specs, {
-                defaultDialect: this._cucumberOpts.featureDefaultLanguage,
-                newId: this._newId
-            })
 
-            await Cucumber.parseGherkinMessageStream({
-                cwd: this._cwd,
-                eventBroadcaster: this._eventBroadcaster,
-                gherkinMessageStream,
-                eventDataCollector: this._eventDataCollector,
-                order: this._cucumberOpts.order,
-                pickleFilter: this._pickleFilter
+            await loadSources({
+                defaultDialect: 'en',
+                paths: this._specs,
+                names: [],
+                tagExpression: '',
+                order: 'defined'
             })
 
             this._hasTests = this._cucumberReporter.eventListener.getPickleIds(this._capabilities).length > 0
@@ -176,16 +175,30 @@ class CucumberAdapter {
                 .getHookParams
                 .bind(this._cucumberReporter.eventListener)
 
-            const runtime = new Cucumber.Runtime({
-                newId: this._newId,
-                eventBroadcaster: this._eventBroadcaster,
-                options: this._cucumberOpts as any as IRuntimeOptions,
-                supportCodeLibrary,
-                eventDataCollector: this._eventDataCollector,
-                pickleIds: this._cucumberReporter!.eventListener.getPickleIds(this._capabilities)
-            })
+            const opts: IRunOptions = {
+                sources: {
+                    defaultDialect: 'en',
+                    paths: this._specs,
+                    names: [],
+                    tagExpression: '',
+                    order: 'defined'
+                },
+                support: supportCodeLibrary,
+                runtime: {
+                    ...this._cucumberOpts as any as IRuntimeOptions,
+                    parallel: 1
+                },
+                formats: {
+                    stdout: '',
+                    files: {},
+                    publish: false,
+                    options: {}
+                }
+            }
 
-            result = await runtime.start() ? 0 : 1
+            const run = await runCucumber(opts, undefined, this._cucumberReporter.eventListener.listeners('envelope')[0] as () => Envelope)
+
+            result = run.success ? 0 : 1
 
             /**
              * if we ignore undefined definitions we trust the reporter
